@@ -105,7 +105,7 @@ public static class BridgeRunner
     {
         var log = loggerFactory.CreateLogger(nameof(BridgeRunner));
         var ollamaBase = configuration["Ollama:BaseUrl"]?.TrimEnd('/') ?? "http://localhost:11434";
-        var model = configuration["Ollama:Model"] ?? "qwen2.5:7b";
+        var model = configuration["Ollama:Model"] ?? "qwen2.5-coder:7b";
         var systemPrompt = !string.IsNullOrWhiteSpace(systemPromptOverride)
             ? systemPromptOverride!.Trim()
             : (configuration["Agent:SqlJsonSystemPrompt"] ?? DefaultSqlJsonSystemPrompt);

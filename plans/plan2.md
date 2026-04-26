@@ -5,7 +5,7 @@
 **The problem was constraining the Ollama request with `format: "json"`** (Ollama API:
 [`format` field](https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-chat-completion)).
 That option forces the model to emit *valid* JSON, which competes with or degrades
-generating a single raw SQL string for qwen2.5:7b in this flow.
+generating a single raw SQL string for qwen2.5-coder:7b in this flow.
 
 **Required fix:** do **not** send `format: "json"` for **any** Ollama call in the
 bridge. JSON mode is proven to break SQL generation. The bridge **never** adds
@@ -18,7 +18,7 @@ schema-enforced output).
 
 ### Context
 
-We call qwen2.5:7b via Ollama to generate MySQL SQL. After **removing** `format: "json"`,
+We call qwen2.5-coder:7b via Ollama to generate MySQL SQL. After **removing** `format: "json"`,
 the model returns **free-form text** (no API JSON constraint). We extract and sanitize
 the SQL before executing it. Step 3 below still handles a JSON *wrapper* if the model
 outputs it as characters in the string—it is not the same as Ollama’s `format: json`.

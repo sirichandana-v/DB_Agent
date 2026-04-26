@@ -43,10 +43,10 @@ flowchart LR
 - **[Ollama](https://ollama.com/download)** — after install, it usually runs in the background (Windows: system tray)
 - **MySQL** with a read-only user — easiest for first try: use the [Docker test database](#local-test-database-docker-mysql-8) in this repo (optional: [Docker Desktop](https://www.docker.com/products/docker-desktop/))
 
-**Default model in this repo:** `Ollama:Model` is **`qwen2.5:7b`** in `OllamaMcpBridge/appsettings.json` and `BridgeWeb/appsettings.json`. You **must download that model once** (or change the config to another model you have):
+**Default model in this repo:** `Ollama:Model` is **`qwen2.5-coder:7b`** in `OllamaMcpBridge/appsettings.json` and `BridgeWeb/appsettings.json`. You **must download that model once** (or change the config to another model you have):
 
 ```bash
-ollama pull qwen2.5:7b
+ollama pull qwen2.5-coder:7b
 ```
 
 Check it exists:
@@ -55,13 +55,13 @@ Check it exists:
 ollama list
 ```
 
-You should see `qwen2.5:7b` in the list. If Ollama is not running, start it (open the Ollama app, or in a terminal run `ollama serve`).
+You should see `qwen2.5-coder:7b` in the list. If Ollama is not running, start it (open the Ollama app, or in a terminal run `ollama serve`).
 
 ## Quick start (do this in order)
 
 You only run **one** .NET app for Q&A: **`OllamaMcpBridge`** (console) or **`BridgeWeb`** (browser). You **do not** need to `dotnet run` `MySqlMcpServer` by hand — the app **starts it for you** in the background.
 
-1. **Start Ollama** and confirm **`qwen2.5:7b` is installed** (commands above). API defaults to `http://localhost:11434`.
+1. **Start Ollama** and confirm **`qwen2.5-coder:7b` is installed** (commands above). API defaults to `http://localhost:11434`.
 2. **Start MySQL** and know your DB name + user + password. For the included Docker test DB, follow [Local test database](#local-test-database-docker-mysql-8) through `docker compose up -d`, then set (replace the password with yours from `mysql.env`):
 
    ```powershell

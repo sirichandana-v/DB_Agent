@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Database assistant</title>
-    <meta name="app-trace-ui" content="v13" />
+    <meta name="app-trace-ui" content="v14" />
     <style>
       :root {
         font-family: "Segoe UI", system-ui, sans-serif;
@@ -342,30 +342,6 @@
         return '<pre class="' + cls + '">' + esc(raw) + "</pre>";
       }
 
-      /** Hides system/user message text in the Ollama request (prompts are server-only). */
-      function redactRequestMessagesForDisplay(jsonStr) {
-        if (jsonStr == null || jsonStr === "") return jsonStr;
-        try {
-          const arr = JSON.parse(jsonStr);
-          if (!Array.isArray(arr)) return jsonStr;
-          const out = arr.map((m) => {
-            if (!m || typeof m !== "object") return m;
-            const role = m.role != null ? String(m.role).toLowerCase() : "";
-            if (role === "system" || role === "user") {
-              return {
-                ...m,
-                content:
-                  "… (omitted: set in apps on the server; table layout is in \"Table structure\" above)",
-              };
-            }
-            return m;
-          });
-          return JSON.stringify(out, null, 2);
-        } catch (e) {
-          return jsonStr;
-        }
-      }
-
       const OUTCOME_LABEL = {
         ollama_http_error: "The model service returned an error",
         ollama_bad_response: "The model service sent an unexpected reply",
@@ -480,11 +456,8 @@
                 esc(label) +
                 "</span></h3>";
               html +=
-                '<p class="chat-step">1) Request — <code>messages</code> to <code>POST /api/chat</code> (system/user text is not shown)</p>';
-              html += preJsonOrText(
-                redactRequestMessagesForDisplay(e.ollamaMessagesJson),
-                "req",
-              );
+                '<p class="chat-step">1) Request — <code>messages</code> to <code>POST /api/chat</code> (full system and user text below)</p>';
+              html += preJsonOrText(e.ollamaMessagesJson, "req");
               html +=
                 '<p class="chat-step">2) Response — full JSON body Ollama returned (assistant is in <code>message</code>)</p>';
               html += preJsonOrText(e.ollamaFullResponseJson, "res");
@@ -537,11 +510,8 @@
                 " — " +
                 esc(lab) +
                 "</h3>";
-              html += '<p class="chat-step">Request <code>messages</code> (system/user text is not shown)</p>';
-              html += preJsonOrText(
-                redactRequestMessagesForDisplay(r.messagesJson),
-                "req",
-              );
+              html += '<p class="chat-step">Request <code>messages</code> (full system and user text below)</p>';
+              html += preJsonOrText(r.messagesJson, "req");
               html += "</div>";
             });
             html += "</section>";
