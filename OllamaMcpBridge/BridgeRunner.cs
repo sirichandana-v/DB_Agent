@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+using MySqlMcpServer;
 
 namespace OllamaMcpBridge;
 
@@ -81,6 +82,10 @@ public static class BridgeRunner
         await using var mcp = await McpClient.CreateAsync(transport, new McpClientOptions(), loggerFactory, cancellationToken)
             .ConfigureAwait(false);
 
+        if (!configuration.GetValue("Agent:UseLegacyToolLoop", false))
+            return await RunDirectSqlJsonPipeline(userMessage, configuration, loggerFactory, mcp, cancellationToken)
+                .ConfigureAwait(false);
+
         var mcpTools = await mcp.ListToolsAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         var ollamaTools = BuildOllamaTools(mcpTools);
         var validToolNames = mcpTools.Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
@@ -110,6 +115,7 @@ public static class BridgeRunner
             ApplyOllamaChatOptions(configuration, requestBody);
 
             var requestJson = requestBody.ToJsonString();
+            LogOllamaOutgoingRequest(configuration, log, "legacy-tool-loop", round, model, messages, requestBody, requestJson);
             using var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
             content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
@@ -259,6 +265,258 @@ public static class BridgeRunner
         };
     }
 
+    private static async Task<BridgeRunResult> RunDirectSqlJsonPipeline(
+        string userMessage,
+        IConfiguration configuration,
+        ILoggerFactory loggerFactory,
+        McpClient mcp,
+        CancellationToken cancellationToken)
+    {
+        var log = loggerFactory.CreateLogger(nameof(BridgeRunner));
+        var ollamaBase = configuration["Ollama:BaseUrl"]?.TrimEnd('/') ?? "http://localhost:11434";
+        var model = configuration["Ollama:Model"] ?? "qwen2.5:7b";
+        var systemPrompt = configuration["Agent:SqlJsonSystemPrompt"] ?? DefaultSqlJsonSystemPrompt;
+
+        var mcpTools = await mcp.ListToolsAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        var validToolNames = mcpTools.Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
+
+        var toolCalls = new List<ToolCallRecord>();
+        const int round = 0;
+
+        var schemaArgs = new Dictionary<string, object?>();
+        var schemaText = await ExecuteToolCallAsync(mcp, validToolNames, "get_schema_context", schemaArgs, cancellationToken)
+            .ConfigureAwait(false);
+        toolCalls.Add(new ToolCallRecord { ToolName = "get_schema_context", Arguments = schemaArgs, ResultText = schemaText });
+        LogToolCompletion(log, round, "get_schema_context", schemaArgs, schemaText);
+
+        if (TryGetToolErrorDetail(schemaText, out var schemaErr))
+        {
+            return new BridgeRunResult
+            {
+                Success = false,
+                ExitCode = 3,
+                ErrorDetail = "get_schema_context failed: " + schemaErr,
+                ToolCalls = toolCalls
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(schemaText))
+        {
+            return new BridgeRunResult
+            {
+                Success = false,
+                ExitCode = 3,
+                ErrorDetail = "get_schema_context returned empty schema.",
+                ToolCalls = toolCalls
+            };
+        }
+
+        var userContent = BuildSqlJsonUserPrompt(userMessage, schemaText, configuration);
+        var messages = new JsonArray
+        {
+            new JsonObject { ["role"] = "system", ["content"] = systemPrompt },
+            new JsonObject { ["role"] = "user", ["content"] = userContent }
+        };
+
+        var requestBody = new JsonObject
+        {
+            ["model"] = model,
+            ["messages"] = JsonNode.Parse(messages.ToJsonString())!,
+            ["stream"] = false
+        };
+        if (configuration.GetValue("Ollama:JsonResponse", true))
+            requestBody["format"] = "json";
+        ApplyOllamaChatOptions(configuration, requestBody);
+
+        var requestJson = requestBody.ToJsonString();
+        LogOllamaOutgoingRequest(configuration, log, "direct-sql-json", null, model, messages, requestBody, requestJson);
+
+        using var http = new HttpClient { BaseAddress = new Uri(ollamaBase + "/") };
+        using var chatContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
+        chatContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+
+        using var response = await http.PostAsync("api/chat", chatContent, cancellationToken).ConfigureAwait(false);
+        var responseText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return new BridgeRunResult
+            {
+                Success = false,
+                ExitCode = 2,
+                ErrorDetail = $"Ollama HTTP {(int)response.StatusCode}: {responseText}",
+                ToolCalls = toolCalls
+            };
+        }
+
+        using var doc = JsonDocument.Parse(responseText);
+        if (!doc.RootElement.TryGetProperty("message", out var message))
+        {
+            return new BridgeRunResult
+            {
+                Success = false,
+                ExitCode = 3,
+                ErrorDetail = "Ollama response missing message.\n" + responseText,
+                ToolCalls = toolCalls
+            };
+        }
+
+        var assistantText = ExtractAssistantText(message);
+        if (!TryParseModelSqlJson(assistantText, out var sql, out var parseErr))
+        {
+            return new BridgeRunResult
+            {
+                Success = false,
+                ExitCode = 8,
+                ErrorDetail = parseErr + "\nRaw model output: " + assistantText,
+                AssistantFinalText = assistantText,
+                ToolCalls = toolCalls
+            };
+        }
+
+        if (!SqlReadOnlyGuard.IsAllowedReadOnlySql(sql, out var guardErr))
+        {
+            return new BridgeRunResult
+            {
+                Success = false,
+                ExitCode = 7,
+                ErrorDetail = guardErr ?? "SQL failed read-only guard.",
+                AssistantFinalText = assistantText,
+                ToolCalls = toolCalls
+            };
+        }
+
+        var execArgs = new Dictionary<string, object?> { ["sql"] = sql };
+        var execResult = await ExecuteToolCallAsync(mcp, validToolNames, "execute_query", execArgs, cancellationToken)
+            .ConfigureAwait(false);
+        toolCalls.Add(new ToolCallRecord { ToolName = "execute_query", Arguments = execArgs, ResultText = execResult });
+        LogToolCompletion(log, round, "execute_query", execArgs, execResult);
+
+        if (IsExecuteQueryFailureResult(execResult))
+        {
+            return new BridgeRunResult
+            {
+                Success = false,
+                ExitCode = 9,
+                ErrorDetail = "execute_query failed or returned an error object.\n" + execResult,
+                AssistantFinalText = assistantText,
+                ToolCalls = toolCalls
+            };
+        }
+
+        return new BridgeRunResult
+        {
+            Success = true,
+            ExitCode = 0,
+            AssistantFinalText = execResult,
+            ToolCalls = toolCalls
+        };
+    }
+
+    private const string DefaultSqlJsonSystemPrompt =
+        "You are a MySQL query writer. Reply with a single JSON object only (no markdown fences, no commentary). " +
+        "The object must have exactly one property \"sql\" whose value is one read-only MySQL statement: a single SELECT or WITH ... SELECT. " +
+        "Use only identifiers that appear in the schema block in the user message.";
+
+    private static string BuildSqlJsonUserPrompt(string userQuestion, string schemaText, IConfiguration configuration)
+    {
+        var hints = configuration["Agent:SqlJsonUserHints"];
+        if (string.IsNullOrWhiteSpace(hints))
+            hints = DefaultSqlJsonUserHints;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("## Database schema (use only these identifiers verbatim)");
+        sb.AppendLine(schemaText.Trim());
+        sb.AppendLine();
+        sb.AppendLine("## Query rules");
+        sb.AppendLine(hints.Trim());
+        sb.AppendLine();
+        sb.AppendLine("## Question");
+        sb.AppendLine(userQuestion.Trim());
+        sb.AppendLine();
+        sb.AppendLine("Respond with one JSON object only. Shape: {\"sql\":\"...\"}. The sql value must be exactly one statement.");
+        return sb.ToString();
+    }
+
+    private const string DefaultSqlJsonUserHints =
+        "Every identifier in sql must appear verbatim in the schema above (same spelling, including plural/singular). " +
+        "If a name is not listed, it does not exist.\n" +
+        "Typical joins: employees.department_id -> departments.id; employees link to projects through assignments " +
+        "(assignments.employee_id -> employees.id, assignments.project_id -> projects.id). " +
+        "Department site is departments.location (not site). Open projects often mean projects.end_date IS NULL. " +
+        "Assignment role and hours are assignments.role_name and assignments.hours_allocated—not employees.role or employees.hours.\n" +
+        "Common mistakes: tables named employee, department, project, or employee_project often do not exist here; use the schema text.\n" +
+        "Read-only only: one SELECT or WITH ... SELECT. No INSERT, UPDATE, DELETE, DDL, or SELECT ... INTO.";
+
+    private static bool TryParseModelSqlJson(string content, out string sql, out string? error)
+    {
+        sql = "";
+        error = null;
+        var normalized = NormalizeAssistantJsonContent(content);
+        try
+        {
+            using var doc = JsonDocument.Parse(normalized);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("sql", out var sqlEl) ||
+                sqlEl.ValueKind != JsonValueKind.String)
+            {
+                error = "Expected a JSON object with a string property \"sql\".";
+                return false;
+            }
+
+            sql = sqlEl.GetString()?.Trim() ?? "";
+            if (sql.Length == 0)
+            {
+                error = "Property \"sql\" is empty.";
+                return false;
+            }
+
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            error = "Model output is not valid JSON: " + ex.Message;
+            return false;
+        }
+    }
+
+    private static string NormalizeAssistantJsonContent(string content)
+    {
+        var s = content.Trim();
+        if (!s.StartsWith("```", StringComparison.Ordinal))
+            return s;
+        var firstNl = s.IndexOf('\n');
+        if (firstNl >= 0)
+            s = s[(firstNl + 1)..];
+        var end = s.LastIndexOf("```", StringComparison.Ordinal);
+        if (end > 0)
+            s = s[..end];
+        return s.Trim();
+    }
+
+    /// <summary>True when the tool returned a JSON object with an "error" property (MCP guard / unknown tool / etc.).</summary>
+    private static bool TryGetToolErrorDetail(string? resultText, out string detail)
+    {
+        detail = "";
+        if (string.IsNullOrWhiteSpace(resultText))
+            return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(resultText);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("error", out var errEl))
+                return false;
+            detail = errEl.GetString() ?? "error";
+            if (doc.RootElement.TryGetProperty("detail", out var dEl) && dEl.ValueKind == JsonValueKind.String)
+                detail = string.IsNullOrWhiteSpace(detail) ? dEl.GetString()! : detail + " " + dEl.GetString();
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Stdout: one JSON object per MCP tool invocation (for E2E validation of SQL and row data).</summary>
     public static void EmitToolJsonlLine(bool enabled, string toolName, IReadOnlyDictionary<string, object?> args,
         string resultText)
@@ -296,6 +554,90 @@ public static class BridgeRunner
             options["num_predict"] = numPredict.Value;
         if (options.Count > 0)
             requestBody["options"] = options;
+    }
+
+    /// <summary>
+    /// Logs chat payload sizes (for context-window planning) and optionally each message JSON as sent to Ollama.
+    /// Controlled by <c>Bridge:LogOllamaContext</c> and <c>Bridge:LogOllamaFullMessages</c>.
+    /// </summary>
+    private static void LogOllamaOutgoingRequest(
+        IConfiguration configuration,
+        ILogger log,
+        string pipeline,
+        int? round,
+        string model,
+        JsonArray messages,
+        JsonObject requestBody,
+        string requestJson)
+    {
+        if (!configuration.GetValue("Bridge:LogOllamaContext", true))
+            return;
+
+        var logFullMessages = configuration.GetValue("Bridge:LogOllamaFullMessages", true);
+        var messagesJson = messages.ToJsonString();
+        var messagesUtf8 = Encoding.UTF8.GetByteCount(messagesJson);
+        var messagesChars = messagesJson.Length;
+        var fullRequestUtf8 = Encoding.UTF8.GetByteCount(requestJson);
+
+        var toolsUtf8 = 0;
+        string? toolsJson = null;
+        if (requestBody["tools"] is { } toolsNode)
+        {
+            toolsJson = toolsNode.ToJsonString();
+            toolsUtf8 = Encoding.UTF8.GetByteCount(toolsJson);
+        }
+
+        var optionsUtf8 = 0;
+        if (requestBody["options"] is { } optNode)
+            optionsUtf8 = Encoding.UTF8.GetByteCount(optNode.ToJsonString());
+
+        var roundLabel = round.HasValue ? round.Value.ToString() : "n/a";
+
+        // ~4 UTF-8 bytes per token is a coarse heuristic (English-ish text); use for rough window planning only.
+        log.LogInformation(
+            "[ollama-chat] summary pipeline={Pipeline} round={Round} model={Model} messageCount={MessageCount} " +
+            "messagesChars={MessagesChars} messagesUtf8Bytes={MessagesUtf8} toolsUtf8Bytes={ToolsUtf8} optionsUtf8Bytes={OptionsUtf8} " +
+            "fullRequestUtf8Bytes={FullRequestUtf8} roughTokenEstimateFromFullRequest={RoughTokens}",
+            pipeline,
+            roundLabel,
+            model,
+            messages.Count,
+            messagesChars,
+            messagesUtf8,
+            toolsUtf8,
+            optionsUtf8,
+            fullRequestUtf8,
+            fullRequestUtf8 / 4);
+
+        if (!logFullMessages)
+            return;
+
+        for (var i = 0; i < messages.Count; i++)
+        {
+            if (messages[i] is not JsonObject msgObj)
+                continue;
+            var role = msgObj["role"] is JsonValue rv ? rv.GetValue<string>() : msgObj["role"]?.ToString() ?? "?";
+            var one = msgObj.ToJsonString();
+            var oneUtf8 = Encoding.UTF8.GetByteCount(one);
+            log.LogInformation(
+                "[ollama-chat] message pipeline={Pipeline} round={Round} index={Index} role={Role} messageUtf8Bytes={Utf8} json={MessageJson}",
+                pipeline,
+                roundLabel,
+                i,
+                role,
+                oneUtf8,
+                one);
+        }
+
+        if (toolsJson is not null)
+        {
+            log.LogInformation(
+                "[ollama-chat] tools pipeline={Pipeline} round={Round} toolsUtf8Bytes={Utf8} json={ToolsJson}",
+                pipeline,
+                roundLabel,
+                toolsUtf8,
+                toolsJson);
+        }
     }
 
     /// <summary>Runs an MCP tool after validating name (hallucinated tools) and required arguments per InsiderLLM-style agent guards.</summary>

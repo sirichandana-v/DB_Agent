@@ -4,7 +4,7 @@ public sealed class BridgeRunResult
 {
     public bool Success { get; init; }
 
-    /// <summary>Non-zero exit code style: 0 = ok, 1 config, 2 ollama http, 3 bad response, 4 max iterations, 5 malformed in-message tool JSON, 6 final answer without successful execute_query after failed attempts.</summary>
+    /// <summary>Non-zero exit code style: 0 = ok, 1 config, 2 ollama http, 3 bad response, 4 max iterations, 5 malformed in-message tool JSON, 6 final answer without successful execute_query after failed attempts, 7 SqlReadOnlyGuard, 8 model JSON/SQL parse, 9 execute_query returned DB error JSON.</summary>
     public int ExitCode { get; init; }
 
     public string? ErrorDetail { get; init; }

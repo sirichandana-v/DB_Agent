@@ -1,6 +1,7 @@
 namespace MySqlMcpServer;
 
-internal static class SqlReadOnlyGuard
+/// <summary>Shared with OllamaMcpBridge for the direct SQL-JSON pipeline (pre-execute sanity check).</summary>
+public static class SqlReadOnlyGuard
 {
     public static bool IsAllowedReadOnlySql(string sql, out string? error)
     {

@@ -4,9 +4,9 @@ On-machine stack: **MySQL 8** ↔ **MCP stdio server (.NET 8)** ↔ **Ollama (`q
 
 ## Prerequisites
 
-- .NET 8 SDK  
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for the **optional local test database** below)  
-- [Ollama](https://ollama.com) with `qwen2.5:7b` pulled (`ollama pull qwen2.5:7b`; stronger tool use than many Llama 3.2 builds)  
+- .NET 8 SDK
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for the **optional local test database** below)
+- [Ollama](https://ollama.com) with `qwen2.5:7b` pulled (`ollama pull qwen2.5:7b`; stronger tool use than many Llama 3.2 builds)
 
 ## Local test database (Docker MySQL 8)
 
@@ -33,11 +33,11 @@ Synthetic data only (`example.test` emails, generated names). **`.env` here is o
 4. **`agent_user` is `SELECT`-only** on `db_agent_test.*` (matches the MCP server’s read-only tools).
 
 5. **Browse tables in the browser (Adminer):** with the stack up, open [http://localhost:8080](http://localhost:8080). Log in with:
-   - **System:** MySQL  
-   - **Server:** `mysql` (Docker service name; already the default)  
-   - **Username:** `root` (full access) or `agent_user` (read-only)  
-   - **Password:** from `mysql.env` (`MYSQL_ROOT_PASSWORD` or `AGENT_USER_PASSWORD`)  
-   - **Database:** `db_agent_test`  
+   - **System:** MySQL
+   - **Server:** `mysql` (Docker service name; already the default)
+   - **Username:** `root` (full access) or `agent_user` (read-only)
+   - **Password:** from `mysql.env` (`MYSQL_ROOT_PASSWORD` or `AGENT_USER_PASSWORD`)
+   - **Database:** `db_agent_test`
 
 6. Connection string for MCP / bridge (PowerShell; use your real `AGENT_USER_PASSWORD` from `mysql.env`):
 
@@ -92,13 +92,13 @@ Logs are written daily under `MySqlMcpServer/logs/` (next to the built output, s
 
 ### MCP tools exposed
 
-| Name | Purpose |
-|------|---------|
-| `get_schema_context` | Full schema text (call before SQL) |
-| `list_tables` | Comma-separated table names |
-| `describe_table` | Columns for one table (`table_name`) |
-| `execute_query` | Read-only `SELECT` / `WITH` only, max 200 rows |
-| `refresh_schema` | Reload cache after DDL changes |
+| Name                 | Purpose                                        |
+| -------------------- | ---------------------------------------------- |
+| `get_schema_context` | Full schema text (call before SQL)             |
+| `list_tables`        | Comma-separated table names                    |
+| `describe_table`     | Columns for one table (`table_name`)           |
+| `execute_query`      | Read-only `SELECT` / `WITH` only, max 200 rows |
+| `refresh_schema`     | Reload cache after DDL changes                 |
 
 ## Ollama bridge (full loop)
 
@@ -127,7 +127,12 @@ curl http://localhost:11434/api/chat -H "Content-Type: application/json" -d "{\"
 MCP uses newline-delimited JSON-RPC. After your client completes the `initialize` handshake, you can call a tool (one JSON object per line written to the server’s stdin). Example body:
 
 ```json
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_tables","arguments":{}}}
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": { "name": "list_tables", "arguments": {} }
+}
 ```
 
 You must send `initialize` / `notifications/initialized` per the MCP spec before `tools/call` will succeed; use an MCP-aware client for full sessions.
@@ -150,6 +155,6 @@ Use a full path to `MySqlMcpServer.csproj` on your machine; **do not** commit re
 
 ## Security notes
 
-- `execute_query` allows only statements that start with `SELECT` or `WITH` (after leading comments), rejects multiple statements, and caps rows at **200**.  
-- Connection strings are never returned from tools.  
+- `execute_query` allows only statements that start with `SELECT` or `WITH` (after leading comments), rejects multiple statements, and caps rows at **200**.
+- Connection strings are never returned from tools.
 - All tool invocations and SQL are logged to the daily log files for audit.
