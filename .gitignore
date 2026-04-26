@@ -1,0 +1,10 @@
+bin/
+obj/
+logs/
+*.user
+.vs/
+.idea/
+
+# Local secrets for Docker MySQL
+.env
+mysql.env

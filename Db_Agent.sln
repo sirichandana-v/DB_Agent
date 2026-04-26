@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MySqlMcpServer", "MySqlMcpServer\MySqlMcpServer.csproj", "{FB5B3465-A155-4B6C-AA8C-DADB2A8350B8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OllamaMcpBridge", "OllamaMcpBridge\OllamaMcpBridge.csproj", "{4D69803E-3E71-4331-B1D0-F0A11664CF73}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BridgeWeb", "BridgeWeb\BridgeWeb.csproj", "{B23444BA-65F6-4981-9075-56C665C7ED2F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FB5B3465-A155-4B6C-AA8C-DADB2A8350B8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FB5B3465-A155-4B6C-AA8C-DADB2A8350B8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FB5B3465-A155-4B6C-AA8C-DADB2A8350B8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FB5B3465-A155-4B6C-AA8C-DADB2A8350B8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4D69803E-3E71-4331-B1D0-F0A11664CF73}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4D69803E-3E71-4331-B1D0-F0A11664CF73}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4D69803E-3E71-4331-B1D0-F0A11664CF73}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4D69803E-3E71-4331-B1D0-F0A11664CF73}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B23444BA-65F6-4981-9075-56C665C7ED2F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B23444BA-65F6-4981-9075-56C665C7ED2F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B23444BA-65F6-4981-9075-56C665C7ED2F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B23444BA-65F6-4981-9075-56C665C7ED2F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

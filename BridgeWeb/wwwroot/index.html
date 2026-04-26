@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Db Agent — trace</title>
+  <!-- bump when index.html changes so browsers pick up new script (cache) -->
+  <meta name="app-trace-ui" content="v2" />
+  <style>
+    :root {
+      font-family: system-ui, Segoe UI, sans-serif;
+      line-height: 1.45;
+      color: #1a1a1a;
+      background: #f0f0f1;
+    }
+    body { max-width: 56rem; margin: 0 auto; padding: 1.25rem; }
+    h1 { font-size: 1.2rem; font-weight: 600; margin: 0 0 0.5rem; }
+    .hint { margin: 0 0 1rem; color: #52525b; font-size: 0.88rem; }
+    label { display: block; font-size: 0.82rem; font-weight: 500; margin-bottom: 0.35rem; }
+    textarea {
+      width: 100%; min-height: 4.5rem; padding: 0.55rem 0.65rem;
+      border: 1px solid #d4d4d8; border-radius: 6px; font: inherit;
+      resize: vertical; box-sizing: border-box; background: #fff;
+    }
+    button {
+      margin-top: 0.5rem; padding: 0.4rem 0.95rem; font: inherit; font-weight: 500;
+      border: none; border-radius: 6px; background: #18181b; color: #fafafa; cursor: pointer;
+    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    #trace {
+      margin-top: 1rem; background: #fff; border: 1px solid #e4e4e7; border-radius: 8px;
+      padding: 0.75rem 1rem; font-size: 0.88rem; display: none;
+    }
+    #trace.visible { display: block; }
+    .outcome { margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px solid #e4e4e7; }
+    .outcome.ok { color: #166534; }
+    .outcome.bad { color: #b91c1c; }
+    .step { margin: 0.85rem 0; }
+    .step-h {
+      font-weight: 600; font-size: 0.82rem; color: #3f3f46;
+      margin: 0 0 0.35rem; letter-spacing: 0.02em;
+    }
+    .step-h .n { color: #71717a; font-weight: 500; margin-right: 0.35rem; }
+    pre {
+      margin: 0; white-space: pre-wrap; word-break: break-word;
+      font-family: ui-monospace, Consolas, monospace; font-size: 0.78rem;
+      background: #fafafa; border: 1px solid #ececee; border-radius: 6px;
+      padding: 0.5rem 0.55rem; max-height: 22rem; overflow: auto;
+    }
+    pre.sql { border-color: #bfdbfe; background: #eff6ff; }
+    .final { margin-top: 1rem; padding-top: 0.75rem; border-top: 2px solid #e4e4e7; }
+    .final .step-h { color: #18181b; }
+  </style>
+</head>
+<body>
+  <h1>Database agent</h1>
+  <p class="hint">Ask in plain English. Below is the <strong>run trace</strong>: every tool the bridge executed, in order, then the model’s final reply. (Set <code>ConnectionStrings__MySQL</code> and run Ollama.)</p>
+
+  <label for="q">Question</label>
+  <textarea id="q" placeholder="How many employees are in Site-1 departments?"></textarea>
+  <button type="button" id="go">Run</button>
+
+  <div id="trace"></div>
+
+  <script>
+    const q = document.getElementById('q');
+    const go = document.getElementById('go');
+    const trace = document.getElementById('trace');
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function fmtBody(text) {
+      if (text == null || text === '') return '<pre>(empty)</pre>';
+      const s = String(text);
+      const t = s.trimStart();
+      // Schema text is not JSON; avoid JSON.parse edge cases.
+      if (/^Table:/im.test(t)) return '<pre>' + esc(s) + '</pre>';
+      if (t.startsWith('{') || t.startsWith('[')) {
+        try {
+          const j = JSON.parse(s);
+          return '<pre>' + esc(JSON.stringify(j, null, 2)) + '</pre>';
+        } catch { /* plain text */ }
+      }
+      return '<pre>' + esc(s) + '</pre>';
+    }
+
+    function toolResult(tc) {
+      if (tc == null) return '';
+      if (tc.result != null && tc.result !== '') return tc.result;
+      if (tc.resultText != null && tc.resultText !== '') return tc.resultText;
+      return '';
+    }
+
+    go.addEventListener('click', async () => {
+      const question = q.value.trim();
+      if (!question) return;
+
+      go.disabled = true;
+      trace.className = 'visible';
+      trace.innerHTML = '<p class="outcome">Running…</p>';
+
+      try {
+        const res = await fetch('/api/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          trace.innerHTML =
+            '<div class="outcome bad"><strong>HTTP ' + res.status + '</strong></div>' + fmtBody(JSON.stringify(data));
+          return;
+        }
+
+        let html = '';
+        if (data.success) {
+          html += '<div class="outcome ok">Finished OK</div>';
+        } else {
+          html += '<div class="outcome bad"><strong>Run failed</strong>';
+          if (data.error) html += ' — ' + esc(data.error);
+          if (data.exitCode != null) html += ' <span style="color:#71717a">(exit ' + data.exitCode + ')</span>';
+          html += '</div>';
+        }
+
+        const calls = data.toolCalls || [];
+        if (calls.length === 0) {
+          html += '<p class="hint" style="margin:0.5rem 0 0">No tools were executed.</p>';
+        } else {
+          calls.forEach((tc, i) => {
+            const n = i + 1;
+            const name = tc.toolName || '(unknown)';
+            html += '<div class="step">';
+            html += '<div class="step-h"><span class="n">' + n + '.</span>Tool <code>' + esc(name) + '</code></div>';
+
+            const args = tc.arguments || {};
+            const sql = args.sql;
+            if (sql) {
+              html += '<pre class="sql">' + esc(sql) + '</pre>';
+            } else if (Object.keys(args).length > 0) {
+              html += '<div class="step-h" style="margin-top:0.25rem">Arguments</div>';
+              html += fmtBody(JSON.stringify(args));
+            }
+
+            html += '<div class="step-h" style="margin-top:0.35rem">Result</div>';
+            html += fmtBody(toolResult(tc));
+            html += '</div>';
+          });
+        }
+
+        const reply = data.assistantReply;
+        if (reply != null && String(reply).length > 0) {
+          html += '<div class="final">';
+          html += '<div class="step-h">Final answer (model)</div>';
+          html += '<pre>' + esc(String(reply)) + '</pre>';
+          html += '</div>';
+        }
+
+        trace.innerHTML = html;
+      } catch (e) {
+        trace.innerHTML = '<div class="outcome bad">Request failed: ' + esc(String(e)) + '</div>';
+      } finally {
+        go.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
