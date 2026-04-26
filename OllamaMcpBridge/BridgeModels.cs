@@ -4,7 +4,11 @@ public sealed class BridgeRunResult
 {
     public bool Success { get; init; }
 
-    /// <summary>Non-zero exit code style: 0 = ok, 1 config, 2 ollama http, 3 bad response, 4 max iterations, 5 malformed in-message tool JSON, 6 final answer without successful execute_query after failed attempts, 7 SqlReadOnlyGuard, 8 SqlSanitizer/parse, 9 execute_query returned DB error JSON.</summary>
+    /// <summary>
+    /// Exit codes from <c>RunDirectSqlPipeline</c>: 0 = ok, 1 = missing MySQL config, 2 = Ollama HTTP error, 3 = bad Ollama
+    /// response or schema error, 7 = read-only SQL guard, 8 = SQL sanitizer, 9 = execute_query failure.
+    /// (Codes 4–6 are unused in the current pipeline; reserved for a future multi-round tool-calling path.)
+    /// </summary>
     public int ExitCode { get; init; }
 
     public string? ErrorDetail { get; init; }
@@ -36,6 +40,10 @@ public sealed class OllamaChatRequestRecord
     public required string MessagesJson { get; init; }
 }
 
+/// <summary>
+/// Traces orchestrator MCP invocations (schema + <c>execute_query</c>) for logging, API, and JSONL. The model
+/// does not return tool calls; this is what C# called on the server.
+/// </summary>
 public sealed class ToolCallRecord
 {
     public required string ToolName { get; init; }

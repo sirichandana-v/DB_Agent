@@ -1,10 +1,11 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>MySQL 8 as an MCP stdio server: schema and read-only query tools. Used by the Ollama bridge as a DB sidecar, or by any MCP client (e.g. Claude). Not a single app title—the transport is MCP.</Description>
   </PropertyGroup>
 
   <ItemGroup>

@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>BridgeWeb</RootNamespace>
+    <Description>Static UI + /api/ask; uses OllamaMcpBridge (same as CLI).</Description>
   </PropertyGroup>
 
   <ItemGroup>

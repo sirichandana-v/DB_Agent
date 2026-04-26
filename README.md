@@ -1,12 +1,100 @@
-# Db_Agent — Local MySQL MCP + Ollama bridge
+# Db_Agent — MySQL (MCP) + Ollama SQL bridge
 
-On-machine stack: **MySQL 8** ↔ **MCP stdio server (.NET 8)** ↔ **Ollama (`qwen2.5:7b` recommended for tool calling)**. No cloud LLMs in the default path.
+**What runs where (see architecture below):** a local model **writes** a `SELECT` as plain text. Your app **never** sends MCP tool definitions to Ollama, **never** lets the model call the database, and **always** runs SQL through the MySQL sidecar after sanitization. No cloud LLMs in the default path.
 
-## Prerequisites
+## Architecture (high level)
 
-- .NET 8 SDK
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for the **optional local test database** below)
-- [Ollama](https://ollama.com) with `qwen2.5:7b` pulled (`ollama pull qwen2.5:7b`; stronger tool use than many Llama 3.2 builds)
+```mermaid
+flowchart LR
+  subgraph app["OllamaMcpBridge / BridgeWeb"]
+    BR["RunDirectSqlPipeline\n(orchestrator)"]
+  end
+  subgraph ollama["Ollama"]
+    L["Model: text in →\nSQL-ish text out"]
+  end
+  subgraph mcp["MySqlMcpServer\n(MCP over stdio)"]
+    S["get_schema_context"]
+    E["execute_query"]
+  end
+  DB[(MySQL)]
+  U["User question"]
+  U --> BR
+  BR -->|"MCP: args only"| S
+  S -->|"schema string"| BR
+  BR -->|"POST /api/chat: system + user\n(user embeds schema + question)\nno tools[]"| L
+  L -->|"assistant text"| BR
+  BR -->|"parse + guard + MCP"| E
+  E --> DB
+  BR -->|"rows / error"| U
+```
+
+| Layer | Role |
+| ----- | ---- |
+| **Ollama** | **Generates** the SQL string from the prompt (schema + your question in the user message). It does **not** execute SQL and does **not** receive an MCP / `tools` list for this app. |
+| **OllamaMcpBridge** | Loads schema via MCP, builds chat messages, calls Ollama, **sanitizes** and **read-only-checks** the reply, then calls **`execute_query`** on the MCP process. **Two things never go to the model:** how tools are named, and raw query results (unless you add that yourself). |
+| **MySqlMcpServer** | Project name = **this process is an MCP stdio server** that exposes MySQL as MCP tools. Used **two ways:** (1) the bridge as **orchestrator** (schema + run SQL), (2) other clients (e.g. Claude Desktop) with full MCP tool use. The name is correct; the confusion was implying the **LLM** was an MCP tool client, which it is not in this pipeline. |
+| **MySQL** | Storage; reached only through `MySqlMcpServer` in this design (connection string on the child process). |
+
+**Your mental model (aligned with code):** attach **database context** (schema text) **into the chat** as part of the user message → **one** Ollama response → **your code** turns that into SQL, validates it, and **executes** it via MCP/`execute_query`. The **LLM is still used** for the **wording** of the SQL, not for tool picking or for running queries.
+
+## What you need installed
+
+- **[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)** — check with `dotnet --version`
+- **[Ollama](https://ollama.com/download)** — after install, it usually runs in the background (Windows: system tray)
+- **MySQL** with a read-only user — easiest for first try: use the [Docker test database](#local-test-database-docker-mysql-8) in this repo (optional: [Docker Desktop](https://www.docker.com/products/docker-desktop/))
+
+**Default model in this repo:** `Ollama:Model` is **`qwen2.5:7b`** in `OllamaMcpBridge/appsettings.json` and `BridgeWeb/appsettings.json`. You **must download that model once** (or change the config to another model you have):
+
+```bash
+ollama pull qwen2.5:7b
+```
+
+Check it exists:
+
+```bash
+ollama list
+```
+
+You should see `qwen2.5:7b` in the list. If Ollama is not running, start it (open the Ollama app, or in a terminal run `ollama serve`).
+
+## Quick start (do this in order)
+
+You only run **one** .NET app for Q&A: **`OllamaMcpBridge`** (console) or **`BridgeWeb`** (browser). You **do not** need to `dotnet run` `MySqlMcpServer` by hand — the app **starts it for you** in the background.
+
+1. **Start Ollama** and confirm **`qwen2.5:7b` is installed** (commands above). API defaults to `http://localhost:11434`.
+2. **Start MySQL** and know your DB name + user + password. For the included Docker test DB, follow [Local test database](#local-test-database-docker-mysql-8) through `docker compose up -d`, then set (replace the password with yours from `mysql.env`):
+
+   ```powershell
+   $env:ConnectionStrings__MySQL = "Server=localhost;Port=3306;Database=db_agent_test;User Id=agent_user;Password=YOUR_PASSWORD;SslMode=None;"
+   ```
+
+   Use your own MySQL instead: change `Server` / `Database` / `User Id` / `Password` in that string. Set this in **the same terminal** you use for the next step.
+
+3. **Go to the repo root** (folder that contains `Db_Agent.sln`):
+
+   ```powershell
+   cd path\to\Db_Agent
+   ```
+
+4. **Start the app** — pick one:
+
+   **A — Web UI (easiest to try)** — leave this terminal open:
+
+   ```powershell
+   dotnet run --project BridgeWeb
+   ```
+
+   When it says it is listening, open a browser: **http://localhost:5088** → type a question in English → click **Run**. The answer appears on the page (and row data as JSON in the “Result” section when it succeeds).
+
+   **B — Console (no browser)** — one-shot question, output in the terminal:
+
+   ```powershell
+   dotnet run --project OllamaMcpBridge -- "How many rows are in the employees table?"
+   ```
+
+5. **If something fails:** Ollama not contacted → check `ollama list` and that nothing blocks port **11434**. DB errors → recheck `ConnectionStrings__MySQL` and that MySQL is up. **Port 8080** in this project is the optional **Adminer** website from Docker; the web app is **5088**, not 8080.
+
+**Optional:** to use a different Ollama model, edit `Ollama:Model` in `appsettings.json` or set `Ollama__Model` in the environment, and run `ollama pull` for that name.
 
 ## Local test database (Docker MySQL 8)
 
@@ -57,7 +145,7 @@ Synthetic data only (`example.test` emails, generated names). **`.env` here is o
    ```powershell
    cd C:\Users\vscsi\Desktop\siri\Db_Agent
    $env:ConnectionStrings__MySQL = "Server=localhost;Port=3306;Database=db_agent_test;User Id=agent_user;Password=YOUR_AGENT_PASSWORD;SslMode=None;"
-   dotnet run --project OllamaMcpBridge -- "How many rows are in the employees table? Use get_schema_context first, then a SELECT."
+   dotnet run --project OllamaMcpBridge -- "How many rows are in the employees table?"
    ```
 
 **Schema:** `departments`, `employees`, `projects`, `assignments` with FKs — **50 rows per table**. Init order: schema → seed → create `agent_user` + `GRANT SELECT`. After changing SQL init files, recreate the volume (`docker compose down -v && docker compose up -d`) so MySQL re-runs init.
@@ -90,21 +178,23 @@ dotnet run --project MySqlMcpServer
 
 Logs are written daily under `MySqlMcpServer/logs/` (next to the built output, see `Logging:LogDirectory` in `appsettings.json`): files like `mcp-server-YYYYMMDD.log`.
 
-### MCP tools exposed
+### MCP tools exposed (MySqlMcpServer)
+
+These are the **MCP** entry points (e.g. for Claude or manual `tools/call`). The **Ollama bridge** only drives **`get_schema_context`** and **`execute_query`** from code; it does not expose MCP tools to the model.
 
 | Name                 | Purpose                                        |
 | -------------------- | ---------------------------------------------- |
-| `get_schema_context` | Full schema text (call before SQL)             |
+| `get_schema_context` | Full schema text (bridge calls this first)     |
 | `list_tables`        | Comma-separated table names                    |
 | `describe_table`     | Columns for one table (`table_name`)           |
 | `execute_query`      | Read-only `SELECT` / `WITH` only, max 200 rows |
 | `refresh_schema`     | Reload cache after DDL changes                 |
 
-## Ollama bridge (full loop)
+## Run the Ollama bridge (CLI) / API
 
-The bridge starts the MCP server as a child process, loads tool definitions from MCP, calls Ollama `/api/chat`, and executes tool calls until the model returns a final answer.
+`BridgeRunner.RunDirectSqlPipeline` in **`OllamaMcpBridge/BridgeRunner.cs`** implements the [architecture above](#architecture-high-level). **`BridgeWeb`** calls the same runner from `POST /api/ask`.
 
-From the repo root (so `MySqlMcpServer/MySqlMcpServer.csproj` can be found), with `ConnectionStrings__MySQL` set in the environment **for this shell** (the child MCP process inherits it):
+From the repo root (so `MySqlMcpServer/MySqlMcpServer.csproj` can be found), with `ConnectionStrings__MySQL` set for the shell (the child MCP process inherits it):
 
 ```powershell
 cd C:\Users\vscsi\Desktop\siri\Db_Agent
@@ -113,14 +203,6 @@ dotnet run --project OllamaMcpBridge -- "How many tables are in the database?"
 ```
 
 Configure Ollama URL/model in `OllamaMcpBridge/appsettings.json` or override with environment (e.g. `Ollama__Model`).
-
-### curl → Ollama with all five tools
-
-Tool schemas are generated from the live MCP server; for a static curl example, mirror the following shape (adjust `parameters` to match your MCP tool schemas from `tools/list`):
-
-```bash
-curl http://localhost:11434/api/chat -H "Content-Type: application/json" -d "{\"model\":\"qwen2.5:7b\",\"stream\":false,\"messages\":[{\"role\":\"system\",\"content\":\"You are a database assistant. Before querying data, call get_schema_context. Use exact table and column names.\"},{\"role\":\"user\",\"content\":\"List all tables.\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_schema_context\",\"description\":\"Returns ALL tables and columns.\",\"parameters\":{\"type\":\"object\",\"properties\":{}}}},{\"type\":\"function\",\"function\":{\"name\":\"list_tables\",\"description\":\"Lists all tables.\",\"parameters\":{\"type\":\"object\",\"properties\":{}}}},{\"type\":\"function\",\"function\":{\"name\":\"describe_table\",\"description\":\"Describe one table.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"table_name\":{\"type\":\"string\"}},\"required\":[\"table_name\"]}}},{\"type\":\"function\",\"function\":{\"name\":\"refresh_schema\",\"description\":\"Reload schema cache.\",\"parameters\":{\"type\":\"object\",\"properties\":{}}}},{\"type\":\"function\",\"function\":{\"name\":\"execute_query\",\"description\":\"Run read-only SELECT/WITH.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"sql\":{\"type\":\"string\"}},\"required\":[\"sql\"]}}}]}"
-```
 
 ## Raw MCP over stdio (single `tools/call` example)
 

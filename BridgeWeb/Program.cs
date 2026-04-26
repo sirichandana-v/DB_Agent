@@ -41,8 +41,7 @@ app.MapPost("/api/ask", async (AskRequest req, IConfiguration config, ILoggerFac
         {
             toolName = tc.ToolName,
             arguments = tc.Arguments.ToDictionary(kv => kv.Key, kv => kv.Value),
-            result = tc.ResultText,
-            resultText = tc.ResultText
+            result = tc.ResultText
         }).ToList();
 
         var ollamaChatRequests = result.OllamaChatRequests.Select(r => new

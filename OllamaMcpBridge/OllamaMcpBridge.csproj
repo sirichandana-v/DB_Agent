@@ -5,6 +5,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>Orchestrator: load schema and run SQL via MySql MCP, ask Ollama for plain-text SQL only (no Ollama tools[]).</Description>
   </PropertyGroup>
 
   <ItemGroup>

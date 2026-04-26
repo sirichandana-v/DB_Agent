@@ -566,7 +566,10 @@ public static class BridgeRunner
         });
     }
 
-    /// <summary>Runs an MCP tool after validating name (hallucinated tools) and required arguments per InsiderLLM-style agent guards.</summary>
+    /// <summary>
+    /// Runs an MCP tool from the orchestrator. The model never selects tools: only this code calls MCP (after
+    /// <c>get_schema_context</c> and, when SQL is valid, <c>execute_query</c>).
+    /// </summary>
     private static async Task<string> ExecuteToolCallAsync(
         McpClient mcp,
         HashSet<string> validToolNames,
