@@ -1,172 +1,570 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Db Agent — trace</title>
-  <!-- bump when index.html changes so browsers pick up new script (cache) -->
-  <meta name="app-trace-ui" content="v2" />
-  <style>
-    :root {
-      font-family: system-ui, Segoe UI, sans-serif;
-      line-height: 1.45;
-      color: #1a1a1a;
-      background: #f0f0f1;
-    }
-    body { max-width: 56rem; margin: 0 auto; padding: 1.25rem; }
-    h1 { font-size: 1.2rem; font-weight: 600; margin: 0 0 0.5rem; }
-    .hint { margin: 0 0 1rem; color: #52525b; font-size: 0.88rem; }
-    label { display: block; font-size: 0.82rem; font-weight: 500; margin-bottom: 0.35rem; }
-    textarea {
-      width: 100%; min-height: 4.5rem; padding: 0.55rem 0.65rem;
-      border: 1px solid #d4d4d8; border-radius: 6px; font: inherit;
-      resize: vertical; box-sizing: border-box; background: #fff;
-    }
-    button {
-      margin-top: 0.5rem; padding: 0.4rem 0.95rem; font: inherit; font-weight: 500;
-      border: none; border-radius: 6px; background: #18181b; color: #fafafa; cursor: pointer;
-    }
-    button:disabled { opacity: 0.55; cursor: not-allowed; }
-    #trace {
-      margin-top: 1rem; background: #fff; border: 1px solid #e4e4e7; border-radius: 8px;
-      padding: 0.75rem 1rem; font-size: 0.88rem; display: none;
-    }
-    #trace.visible { display: block; }
-    .outcome { margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px solid #e4e4e7; }
-    .outcome.ok { color: #166534; }
-    .outcome.bad { color: #b91c1c; }
-    .step { margin: 0.85rem 0; }
-    .step-h {
-      font-weight: 600; font-size: 0.82rem; color: #3f3f46;
-      margin: 0 0 0.35rem; letter-spacing: 0.02em;
-    }
-    .step-h .n { color: #71717a; font-weight: 500; margin-right: 0.35rem; }
-    pre {
-      margin: 0; white-space: pre-wrap; word-break: break-word;
-      font-family: ui-monospace, Consolas, monospace; font-size: 0.78rem;
-      background: #fafafa; border: 1px solid #ececee; border-radius: 6px;
-      padding: 0.5rem 0.55rem; max-height: 22rem; overflow: auto;
-    }
-    pre.sql { border-color: #bfdbfe; background: #eff6ff; }
-    .final { margin-top: 1rem; padding-top: 0.75rem; border-top: 2px solid #e4e4e7; }
-    .final .step-h { color: #18181b; }
-  </style>
-</head>
-<body>
-  <h1>Database agent</h1>
-  <p class="hint">Ask in plain English. Below is the <strong>run trace</strong>: every tool the bridge executed, in order, then the model’s final reply. (Set <code>ConnectionStrings__MySQL</code> and run Ollama.)</p>
-
-  <label for="q">Question</label>
-  <textarea id="q" placeholder="How many employees are in Site-1 departments?"></textarea>
-  <button type="button" id="go">Run</button>
-
-  <div id="trace"></div>
-
-  <script>
-    const q = document.getElementById('q');
-    const go = document.getElementById('go');
-    const trace = document.getElementById('trace');
-
-    function esc(s) {
-      const d = document.createElement('div');
-      d.textContent = s;
-      return d.innerHTML;
-    }
-
-    function fmtBody(text) {
-      if (text == null || text === '') return '<pre>(empty)</pre>';
-      const s = String(text);
-      const t = s.trimStart();
-      // Schema text is not JSON; avoid JSON.parse edge cases.
-      if (/^Table:/im.test(t)) return '<pre>' + esc(s) + '</pre>';
-      if (t.startsWith('{') || t.startsWith('[')) {
-        try {
-          const j = JSON.parse(s);
-          return '<pre>' + esc(JSON.stringify(j, null, 2)) + '</pre>';
-        } catch { /* plain text */ }
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Database assistant</title>
+    <meta name="app-trace-ui" content="v13" />
+    <style>
+      :root {
+        font-family: "Segoe UI", system-ui, sans-serif;
+        line-height: 1.5;
+        color: #1c1917;
+        background: #f5f5f4;
+        --card: #fff;
+        --border: #e7e5e4;
+        --muted: #57534e;
+        --accent: #0c4a6e;
+        --ok: #15803d;
+        --bad: #b91c1c;
+        --soft: #fafaf9;
       }
-      return '<pre>' + esc(s) + '</pre>';
-    }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 1.25rem 1rem 2.5rem;
+        max-width: min(72rem, 100% - 2rem);
+        margin-left: auto;
+        margin-right: auto;
+      }
+      h1 {
+        font-size: 1.35rem;
+        font-weight: 600;
+        margin: 0 0 0.35rem;
+        color: #0c0a09;
+      }
+      .lead {
+        margin: 0 0 1.25rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      section.block {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 1rem 1.1rem;
+        margin-bottom: 1rem;
+      }
+      section.block h2 {
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        margin: 0 0 0.65rem;
+      }
+      label {
+        display: block;
+        font-size: 0.82rem;
+        font-weight: 500;
+        color: #44403c;
+        margin-bottom: 0.35rem;
+      }
+      label .hint {
+        font-weight: 400;
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+      textarea,
+      input[type="text"] {
+        width: 100%;
+        min-height: 2.5rem;
+        padding: 0.5rem 0.6rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font: inherit;
+        background: #fff;
+        color: inherit;
+      }
+      textarea {
+        min-height: 5rem;
+        resize: vertical;
+      }
+      #question {
+        min-height: 3.2rem;
+      }
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-top: 0.6rem;
+      }
+      button {
+        padding: 0.45rem 1.1rem;
+        font: inherit;
+        font-weight: 600;
+        font-size: 0.9rem;
+        border: none;
+        border-radius: 8px;
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .banner {
+        display: none;
+        padding: 0.65rem 0.9rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        margin-bottom: 1rem;
+      }
+      .banner.visible {
+        display: block;
+      }
+      .banner.ok {
+        background: #ecfdf5;
+        color: #065f46;
+        border: 1px solid #a7f3d0;
+      }
+      .banner.bad {
+        background: #fef2f2;
+        color: #991b1b;
+        border: 1px solid #fecaca;
+      }
+      .step-num {
+        color: var(--accent);
+        font-weight: 700;
+        margin-right: 0.25rem;
+      }
+      .out-sub {
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin: 0.6rem 0 0.35rem;
+        font-weight: 600;
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 0.78rem;
+        font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+        line-height: 1.4;
+        background: var(--soft);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 0.6rem 0.65rem;
+      }
+      .timeline pre {
+        max-height: none;
+        overflow: visible;
+      }
+      pre.result-json {
+        border-color: #bae6fd;
+        background: #f0f9ff;
+      }
+      pre.schema {
+        border-color: #d6d3d1;
+      }
+      .chat-step {
+        font-weight: 600;
+        font-size: 0.84rem;
+        margin: 0.9rem 0 0.4rem;
+        color: #292524;
+      }
+      .chat-step:first-child {
+        margin-top: 0;
+      }
+      pre.chat-block {
+        border-left: 4px solid #78716c;
+        background: var(--soft);
+        max-height: none;
+      }
+      pre.chat-block.req {
+        border-left-color: #0369a1;
+        background: #f8fafc;
+      }
+      pre.chat-block.res {
+        border-left-color: #15803d;
+        background: #f0fdf4;
+      }
+      pre.chat-block.extract {
+        border-left-color: #b45309;
+        background: #fffbeb;
+      }
+      .attempt-h {
+        font-size: 1rem;
+        margin: 0 0 0.5rem;
+        font-weight: 600;
+      }
+      .ex-card {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.75rem;
+        margin-top: 0.65rem;
+        background: #fff;
+      }
+      .ex-card:first-of-type {
+        margin-top: 0.35rem;
+      }
+      .badge {
+        display: inline-block;
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 0.2rem 0.45rem;
+        border-radius: 4px;
+        margin-bottom: 0.5rem;
+      }
+      .badge.ok {
+        background: #dcfce7;
+        color: #166534;
+      }
+      .badge.warn {
+        background: #ffedd5;
+        color: #9a3412;
+      }
+      .badge.err {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      #out {
+        display: none;
+      }
+      #out.visible {
+        display: block;
+      }
+      .schema-result-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        align-items: start;
+      }
+      .schema-result-row > .block {
+        margin-bottom: 0;
+      }
+      .schema-result-row .result-pane pre.timeline,
+      .schema-result-row .result-pane pre.schema,
+      .schema-result-row .result-pane pre.result-json {
+        max-height: min(50vh, 22rem);
+        overflow: auto;
+      }
+      @media (max-width: 56rem) {
+        .schema-result-row {
+          grid-template-columns: 1fr;
+        }
+        .schema-result-row .result-pane pre.timeline,
+        .schema-result-row .result-pane pre.schema,
+        .schema-result-row .result-pane pre.result-json {
+          max-height: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Database assistant</h1>
+    <p class="lead">
+      Ask a question in plain language. The app loads your database layout, asks
+      the local model for a read-only query, runs it, and shows each step in
+      order. <strong>Scroll the page</strong> to read long messages in full; the
+      conversation section does not cut off text.
+    </p>
 
-    function toolResult(tc) {
-      if (tc == null) return '';
-      if (tc.result != null && tc.result !== '') return tc.result;
-      if (tc.resultText != null && tc.resultText !== '') return tc.resultText;
-      return '';
-    }
+    <section class="block">
+      <h2>Question</h2>
+      <label for="question">What to ask the database (in plain English)</label>
+      <textarea
+        id="question"
+        placeholder="e.g. How many employees are in each department?"
+      ></textarea>
+      <div class="actions">
+        <button type="button" id="go">Run</button>
+      </div>
+    </section>
 
-    go.addEventListener('click', async () => {
-      const question = q.value.trim();
-      if (!question) return;
+    <div id="banner" class="banner" role="status"></div>
+    <div id="out"></div>
 
-      go.disabled = true;
-      trace.className = 'visible';
-      trace.innerHTML = '<p class="outcome">Running…</p>';
+    <script>
+      const question = document.getElementById("question");
+      const go = document.getElementById("go");
+      const out = document.getElementById("out");
+      const banner = document.getElementById("banner");
 
-      try {
-        const res = await fetch('/api/ask', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question })
-        });
-        const data = await res.json();
+      function esc(s) {
+        const d = document.createElement("div");
+        d.textContent = s == null ? "" : String(s);
+        return d.innerHTML;
+      }
 
-        if (!res.ok) {
-          trace.innerHTML =
-            '<div class="outcome bad"><strong>HTTP ' + res.status + '</strong></div>' + fmtBody(JSON.stringify(data));
+      function formatPayload(text) {
+        if (text == null || text === "")
+          return '<pre class="empty">(empty)</pre>';
+        const s = String(text).trim();
+        if (s.startsWith("{") || s.startsWith("[")) {
+          try {
+            return (
+              '<pre class="result-json timeline">' +
+              esc(JSON.stringify(JSON.parse(s), null, 2)) +
+              "</pre>"
+            );
+          } catch {
+            /* fall through */
+          }
+        }
+        if (/^Table:/im.test(s))
+          return '<pre class="schema timeline">' + esc(s) + "</pre>";
+        return '<pre class="timeline">' + esc(s) + "</pre>";
+      }
+
+      /** @param {'req'|'res'|''} [kind] */
+      function preJsonOrText(s, kind) {
+        const cls =
+          kind === "req"
+            ? "chat-block req"
+            : kind === "res"
+              ? "chat-block res"
+              : "chat-block";
+        if (s == null || s === "") {
+          return '<pre class="' + cls + '">(empty)</pre>';
+        }
+        const raw = String(s);
+        const t = raw.trim();
+        if (t.startsWith("{") || t.startsWith("[")) {
+          try {
+            return (
+              '<pre class="' +
+              cls +
+              '">' +
+              esc(JSON.stringify(JSON.parse(raw), null, 2)) +
+              "</pre>"
+            );
+          } catch (e) {
+            /* not valid JSON, show raw */
+          }
+        }
+        return '<pre class="' + cls + '">' + esc(raw) + "</pre>";
+      }
+
+      /** Hides system/user message text in the Ollama request (prompts are server-only). */
+      function redactRequestMessagesForDisplay(jsonStr) {
+        if (jsonStr == null || jsonStr === "") return jsonStr;
+        try {
+          const arr = JSON.parse(jsonStr);
+          if (!Array.isArray(arr)) return jsonStr;
+          const out = arr.map((m) => {
+            if (!m || typeof m !== "object") return m;
+            const role = m.role != null ? String(m.role).toLowerCase() : "";
+            if (role === "system" || role === "user") {
+              return {
+                ...m,
+                content:
+                  "… (omitted: set in apps on the server; table layout is in \"Table structure\" above)",
+              };
+            }
+            return m;
+          });
+          return JSON.stringify(out, null, 2);
+        } catch (e) {
+          return jsonStr;
+        }
+      }
+
+      const OUTCOME_LABEL = {
+        ollama_http_error: "The model service returned an error",
+        ollama_bad_response: "The model service sent an unexpected reply",
+        sql_sanitize_failed: "The model did not return usable SQL",
+        read_only_guard_failed: "The query was not allowed (read-only rule)",
+        execute_failed: "The database rejected the query",
+        ok: "This attempt completed successfully",
+      };
+
+      function outcomeBadgeClass(outcome) {
+        if (outcome === "ok") return "ok";
+        if (!outcome) return "warn";
+        return "err";
+      }
+
+      go.addEventListener("click", async () => {
+        const q = question.value.trim();
+        if (!q) {
+          banner.className = "banner visible bad";
+          banner.textContent = "Type a question first, then press Run.";
           return;
         }
+        go.disabled = true;
+        banner.className = "banner visible";
+        banner.textContent = "Working…";
+        out.className = "visible";
+        out.innerHTML = "";
 
-        let html = '';
-        if (data.success) {
-          html += '<div class="outcome ok">Finished OK</div>';
-        } else {
-          html += '<div class="outcome bad"><strong>Run failed</strong>';
-          if (data.error) html += ' — ' + esc(data.error);
-          if (data.exitCode != null) html += ' <span style="color:#71717a">(exit ' + data.exitCode + ')</span>';
-          html += '</div>';
-        }
+        const body = { question: q };
 
-        const calls = data.toolCalls || [];
-        if (calls.length === 0) {
-          html += '<p class="hint" style="margin:0.5rem 0 0">No tools were executed.</p>';
-        } else {
-          calls.forEach((tc, i) => {
-            const n = i + 1;
-            const name = tc.toolName || '(unknown)';
-            html += '<div class="step">';
-            html += '<div class="step-h"><span class="n">' + n + '.</span>Tool <code>' + esc(name) + '</code></div>';
-
-            const args = tc.arguments || {};
-            const sql = args.sql;
-            if (sql) {
-              html += '<pre class="sql">' + esc(sql) + '</pre>';
-            } else if (Object.keys(args).length > 0) {
-              html += '<div class="step-h" style="margin-top:0.25rem">Arguments</div>';
-              html += fmtBody(JSON.stringify(args));
-            }
-
-            html += '<div class="step-h" style="margin-top:0.35rem">Result</div>';
-            html += fmtBody(toolResult(tc));
-            html += '</div>';
+        try {
+          const res = await fetch("/api/ask", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
           });
-        }
+          const data = await res.json();
+          if (!res.ok) {
+            banner.className = "banner visible bad";
+            banner.textContent = "Request failed: HTTP " + res.status;
+            out.innerHTML = formatPayload(
+              typeof data === "string" ? data : JSON.stringify(data, null, 2),
+            );
+            return;
+          }
 
-        const reply = data.assistantReply;
-        if (reply != null && String(reply).length > 0) {
-          html += '<div class="final">';
-          html += '<div class="step-h">Final answer (model)</div>';
-          html += '<pre>' + esc(String(reply)) + '</pre>';
-          html += '</div>';
-        }
+          if (data.success) {
+            banner.className = "banner visible ok";
+            banner.textContent = "Completed successfully. Details below.";
+          } else {
+            banner.className = "banner visible bad";
+            banner.textContent =
+              (data.error || "Run failed") +
+              (data.exitCode != null ? " (code " + data.exitCode + ")" : "");
+          }
 
-        trace.innerHTML = html;
-      } catch (e) {
-        trace.innerHTML = '<div class="outcome bad">Request failed: ' + esc(String(e)) + '</div>';
-      } finally {
-        go.disabled = false;
-      }
-    });
-  </script>
-</body>
+          let html = "";
+          const stepChat = data.schemaText ? 3 : 1;
+          const stepResult = 2;
+
+          let resultInner = "";
+          if (
+            data.assistantReply != null &&
+            String(data.assistantReply).length
+          ) {
+            const ar = String(data.assistantReply);
+            resultInner =
+              '<p class="lead" style="font-size:0.88rem">Rows returned as JSON, or a short message from the run.</p>';
+            resultInner += formatPayload(ar);
+          } else {
+            resultInner = '<p class="lead">No result text for this run.</p>';
+          }
+          const resultSectionHtml =
+            '<section class="block result-pane"><h2><span class="step-num">' +
+            stepResult +
+            '</span>Result</h2>' +
+            resultInner +
+            "</section>";
+
+          if (data.schemaText) {
+            html += '<div class="schema-result-row">';
+            html +=
+              '<section class="block"><h2><span class="step-num">1</span>Table structure (from your database)</h2>';
+            html +=
+              '<p class="lead" style="font-size:0.88rem;margin-top:-0.25rem">This is the schema text included in the message to the model so it can use the correct table and column names.</p>';
+            html += formatPayload(data.schemaText);
+            html += "</section>";
+            html += resultSectionHtml;
+            html += "</div>";
+          }
+
+          const ex = data.directSqlExchanges;
+          const ocr = data.ollamaChatRequests || [];
+          if (ex && ex.length) {
+            html +=
+              '<section class="block"><h2><span class="step-num">' +
+              stepChat +
+              "</span>Chat with Ollama (send, then full response)</h2>";
+            html +=
+              "<p class=\"lead\" style=\"font-size:0.88rem;margin-top:-0.25rem\">Each attempt is one round trip. You always get the full <strong>request</strong> (<code>messages</code>) and the full <strong>response body</strong> from Ollama. The model reply (assistant) is under <code>message</code> in that JSON. If the run retries, Attempt 2 appears after Attempt 1.</p>";
+            ex.forEach(function (e) {
+              const label = OUTCOME_LABEL[e.outcome] || e.outcome || "Step";
+              html += '<div class="ex-card">';
+              html +=
+                '<h3 class="attempt-h">Attempt ' +
+                esc(String(e.attempt)) +
+                " — ";
+              html +=
+                '<span class="badge ' +
+                esc(outcomeBadgeClass(e.outcome)) +
+                '">' +
+                esc(label) +
+                "</span></h3>";
+              html +=
+                '<p class="chat-step">1) Request — <code>messages</code> to <code>POST /api/chat</code> (system/user text is not shown)</p>';
+              html += preJsonOrText(
+                redactRequestMessagesForDisplay(e.ollamaMessagesJson),
+                "req",
+              );
+              html +=
+                '<p class="chat-step">2) Response — full JSON body Ollama returned (assistant is in <code>message</code>)</p>';
+              html += preJsonOrText(e.ollamaFullResponseJson, "res");
+              html +=
+                '<p class="chat-step">3) Text we extracted from <code>message.content</code> to parse SQL (string or array form)</p>';
+              html +=
+                '<pre class="chat-block extract">' +
+                esc(
+                  e.assistantRaw != null && String(e.assistantRaw) !== ""
+                    ? String(e.assistantRaw)
+                    : "(empty — if you still see the model’s words in block 2, the content format may be array-only; the full text is in the JSON above.)",
+                ) +
+                "</pre>";
+              if (e.sanitizedSql) {
+                html += '<p class="chat-step">4) SQL we ran</p>';
+                html +=
+                  '<pre class="chat-block">' +
+                  esc(String(e.sanitizedSql)) +
+                  "</pre>";
+              }
+              if (e.executeResultPreview) {
+                html +=
+                  '<p class="chat-step">5) Database result (this try)</p>';
+                html += formatPayload(e.executeResultPreview);
+              }
+              if (e.errorOrHint) {
+                html += '<p class="chat-step">Note</p>';
+                html +=
+                  '<pre class="chat-block">' +
+                  esc(String(e.errorOrHint)) +
+                  "</pre>";
+              }
+              html += "</div>";
+            });
+            html += "</section>";
+          } else if (ocr.length) {
+            html +=
+              '<section class="block"><h2><span class="step-num">' +
+              stepChat +
+              "</span>Chat with Ollama</h2>";
+            html +=
+              '<p class="lead" style="font-size:0.88rem">Outgoing requests only (no per-attempt log on this run).</p>';
+            ocr.forEach(function (r, idx) {
+              const lab =
+                (r.pipeline || "chat") +
+                (r.round != null ? " · round " + r.round : "");
+              html +=
+                '<div class="ex-card"><h3 class="attempt-h">Call ' +
+                (idx + 1) +
+                " — " +
+                esc(lab) +
+                "</h3>";
+              html += '<p class="chat-step">Request <code>messages</code> (system/user text is not shown)</p>';
+              html += preJsonOrText(
+                redactRequestMessagesForDisplay(r.messagesJson),
+                "req",
+              );
+              html += "</div>";
+            });
+            html += "</section>";
+          } else {
+            html +=
+              '<section class="block"><h2><span class="step-num">' +
+              stepChat +
+              '</span>Chat with Ollama</h2><p class="lead">No model traffic was recorded for this run.</p></section>';
+          }
+
+          if (!data.schemaText) {
+            html += resultSectionHtml;
+          }
+
+          out.innerHTML = html;
+        } catch (e) {
+          banner.className = "banner visible bad";
+          banner.textContent = "Request failed: " + String(e);
+          out.innerHTML = "";
+        } finally {
+          go.disabled = false;
+        }
+      });
+    </script>
+  </body>
 </html>

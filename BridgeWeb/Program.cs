@@ -36,15 +36,32 @@ app.MapPost("/api/ask", async (AskRequest req, IConfiguration config, ILoggerFac
 
     try
     {
-        var result = await BridgeRunner.RunAsync(q, config, lf, ct).ConfigureAwait(false);
+        var result = await BridgeRunner.RunAsync(q, config, lf, null, null, ct).ConfigureAwait(false);
         var toolCalls = result.ToolCalls.Select(tc => new
         {
             toolName = tc.ToolName,
             arguments = tc.Arguments.ToDictionary(kv => kv.Key, kv => kv.Value),
-            // Primary field for the trace UI.
             result = tc.ResultText,
-            // Older cached index.html read resultText / resultJson; keep aliases so Result is never blank after API changes.
             resultText = tc.ResultText
+        }).ToList();
+
+        var ollamaChatRequests = result.OllamaChatRequests.Select(r => new
+        {
+            r.Pipeline,
+            r.Round,
+            messagesJson = r.MessagesJson
+        }).ToList();
+
+        var directSqlExchanges = result.DirectSqlExchanges.Select(e => new
+        {
+            e.Attempt,
+            e.Outcome,
+            ollamaMessagesJson = e.OllamaMessagesJson,
+            ollamaFullResponseJson = e.OllamaFullResponseJson,
+            e.AssistantRaw,
+            e.SanitizedSql,
+            e.ErrorOrHint,
+            e.ExecuteResultPreview
         }).ToList();
 
         return Results.Json(new
@@ -53,7 +70,10 @@ app.MapPost("/api/ask", async (AskRequest req, IConfiguration config, ILoggerFac
             exitCode = result.ExitCode,
             error = result.ErrorDetail,
             assistantReply = result.AssistantFinalText,
-            toolCalls
+            toolCalls,
+            ollamaChatRequests,
+            schemaText = result.SchemaText,
+            directSqlExchanges
         }, jsonOptions);
     }
     catch (Exception ex)

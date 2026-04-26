@@ -60,7 +60,7 @@ Synthetic data only (`example.test` emails, generated names). **`.env` here is o
    dotnet run --project OllamaMcpBridge -- "How many rows are in the employees table? Use get_schema_context first, then a SELECT."
    ```
 
-**Schema:** `departments`, `employees`, `projects`, `assignments` with FKs — **50 rows per table**. Init order: schema → seed → create `agent_user` + `GRANT SELECT`.
+**Schema:** `departments`, `employees`, `projects`, `assignments` with FKs — **50 rows per table**. Init order: schema → seed → create `agent_user` + `GRANT SELECT`. After changing SQL init files, recreate the volume (`docker compose down -v && docker compose up -d`) so MySQL re-runs init.
 
 If `99-create-agent-user.sh` fails on Windows, ensure the file uses **LF** line endings (see `.gitattributes`).
 

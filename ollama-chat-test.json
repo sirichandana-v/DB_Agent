@@ -1,0 +1,17 @@
+{
+  "model": "qwen2.5:7b",
+  "stream": false,
+  "options": {
+    "temperature": 0.2
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a MySQL expert. Write only a valid MySQL SELECT query. No explanation, no markdown, no JSON wrapper."
+    },
+    {
+      "role": "user",
+      "content": "## Database schema (use only these identifiers verbatim)\nTable: assignments\n  - id (int) nullable=False key=PRI\n  - employee_id (int) nullable=False key=MUL\n  - project_id (int) nullable=False key=MUL\n  - role_name (varchar) nullable=False key=\n  - hours_allocated (decimal) nullable=False key=\n  - assigned_date (date) nullable=False key=\n\nTable: departments\n  - id (int) nullable=False key=PRI\n  - name (varchar) nullable=False key=UNI\n  - location (varchar) nullable=False key=\n  - created_at (date) nullable=False key=\n\nTable: employees\n  - id (int) nullable=False key=PRI\n  - department_id (int) nullable=False key=MUL\n  - first_name (varchar) nullable=False key=\n  - last_name (varchar) nullable=False key=\n  - email (varchar) nullable=False key=UNI\n  - hire_date (date) nullable=False key=\n  - salary (decimal) nullable=True key=\n\nTable: projects\n  - id (int) nullable=False key=PRI\n  - name (varchar) nullable=False key=UNI\n  - start_date (date) nullable=False key=\n  - end_date (date) nullable=True key=\n  - budget (decimal) nullable=False key=\n\n## Question\nFor each department location, how many assignments are there, what is the total hours_allocated, and what is the average employee salary in that location? Order by location.\n\nOutput exactly one read-only MySQL statement: a single SELECT or WITH ... SELECT."
+    }
+  ]
+}
