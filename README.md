@@ -67,13 +67,13 @@ You only run **one** .NET app for Q&A: **`OllamaMcpBridge`** (console) or **`Bri
    ollama list
    ```
    API defaults to `http://localhost:11434`. (See also [**What you need installed**](#what-you-need-installed) for context.)
-2. **Start MySQL** and know your DB name + user + password. For the included Docker test DB, follow [Local test database](#local-test-database-docker-mysql-8) through `docker compose up -d`, then set (replace the password with yours from `mysql.env`):
+2. **Start MySQL** and know your DB name + user + password. The connection string must use a **read-only** MySQL account (`GRANT … SELECT` only on the app database, not an admin or `root` user in production). For the included Docker test DB, follow [Local test database](#local-test-database-docker-mysql-8) through `docker compose up -d`, then set (replace the password with yours from `mysql.env`):
 
    ```powershell
    $env:ConnectionStrings__MySQL = "Server=localhost;Port=3306;Database=db_agent_test;User Id=agent_user;Password=YOUR_PASSWORD;SslMode=None;"
    ```
 
-   Use your own MySQL instead: change `Server` / `Database` / `User Id` / `Password` in that string. Set this in **the same terminal** you use for the next step.
+   Use your own MySQL instead: change `Server` / `Database` / `User Id` / `Password` in that string, but still use a `SELECT`-only user. Set this in **the same terminal** you use for the next step.
 
 3. **Go to the repo root** (folder that contains `Db_Agent.sln`):
 
@@ -161,7 +161,9 @@ If `99-create-agent-user.sh` fails on Windows, ensure the file uses **LF** line 
 
 ## Secrets (do not commit passwords)
 
-**Application (all environments):** set the DB user the MCP server uses—typically a **single** connection string (least privilege, `SELECT` only in production), not MySQL `root`.
+**Connection string and database role:** `ConnectionStrings__MySQL` must point at a **read-only** MySQL user: grant **`SELECT` only** (and whatever `INFORMATION_SCHEMA` / metadata reads your policy allows) on the target schema—**not** `root` or a user that can `INSERT`/`UPDATE`/`DELETE`/`DDL`. In Docker, `agent_user` is created with `GRANT SELECT ON db_agent_test.*` so the server enforces least privilege even if something bypasses app-level checks. Treat app guards as an extra layer, not a substitute for MySQL permissions.
+
+**Application (all environments):** the MCP child process and any direct `MySqlMcpServer` run use the same **single** connection string.
 
 Set the connection string via environment (recommended for sensitive data):
 
@@ -242,8 +244,13 @@ Add to `%APPDATA%\Claude\claude_desktop_config.json` under `mcpServers`:
 
 Use a full path to `MySqlMcpServer.csproj` on your machine; **do not** commit real credentials—set `env` locally or use OS-level secrets.
 
-## Security notes
+## Security notes (read-only SQL)
 
-- `execute_query` allows only statements that start with `SELECT` or `WITH` (after leading comments), rejects multiple statements, and caps rows at **200**.
-- Connection strings are never returned from tools.
-- All tool invocations and SQL are logged to the daily log files for audit.
+Defense in depth—none of this replaces a **read-only** DB user; together they limit what can run and what can succeed:
+
+- **MySQL user:** the account in `ConnectionStrings__MySQL` should be **`SELECT`-only** on the app database (see [Secrets](#secrets-do-not-commit-passwords)). In Docker, init grants only `SELECT` to `agent_user`.
+- **Ollama bridge `SqlSanitizer`:** one statement only, max length, must start with `SELECT` or `WITH`; rejects disallowed `;`, `--`, `/* */`, `::` casts, `xp_` references, and high-risk whole-word matches (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, `TRUNCATE`, `EXEC(UTE)`, `INTO`, `GRANT`, `REVOKE`). Implementation: `OllamaMcpBridge/Services/SqlSanitizer.cs`.
+- **Shared `SqlReadOnlyGuard`:** before `execute_query` runs, leading `--` / `#` / `/* */` comments are stripped, then the statement must start with `SELECT` or `WITH`, with no `;` outside string/backtick delimiters. Used from **`BridgeRunner`** and **`DatabaseService`**. Implementation: `MySqlMcpServer/SqlReadOnlyGuard.cs`.
+- **MCP / server:** `execute_query` is documented as read-only; **`DatabaseService.ExecuteQueryAsync`** applies the guard again and enforces a **200-row** cap (`MaxRows`).
+
+Operational notes: connection strings are **never** returned from tools; tool calls and SQL are **logged** to the daily log files for audit.
