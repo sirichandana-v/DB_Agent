@@ -159,7 +159,11 @@ public static class BridgeRunner
         string? lastAssistantText = null;
         string? lastErrorDetail = null;
 
+        var ollamaTimeout = configuration.GetValue("Ollama:RequestTimeoutSeconds", 600);
+        if (ollamaTimeout < 10)
+            ollamaTimeout = 10;
         using var http = new HttpClient { BaseAddress = new Uri(ollamaBase + "/") };
+        http.Timeout = TimeSpan.FromSeconds(ollamaTimeout);
 
         for (var attempt = 1; attempt <= maxDirectSqlAttempts; attempt++)
         {

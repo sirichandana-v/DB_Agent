@@ -61,7 +61,12 @@ You should see `qwen2.5-coder:7b` in the list. If Ollama is not running, start i
 
 You only run **one** .NET app for Q&A: **`OllamaMcpBridge`** (console) or **`BridgeWeb`** (browser). You **do not** need to `dotnet run` `MySqlMcpServer` by hand — the app **starts it for you** in the background.
 
-1. **Start Ollama** and confirm **`qwen2.5-coder:7b` is installed** (commands above). API defaults to `http://localhost:11434`.
+1. **Start Ollama** and **pull the default model** (first time only), then confirm it is listed:
+   ```bash
+   ollama pull qwen2.5-coder:7b
+   ollama list
+   ```
+   API defaults to `http://localhost:11434`. (See also [**What you need installed**](#what-you-need-installed) for context.)
 2. **Start MySQL** and know your DB name + user + password. For the included Docker test DB, follow [Local test database](#local-test-database-docker-mysql-8) through `docker compose up -d`, then set (replace the password with yours from `mysql.env`):
 
    ```powershell
@@ -94,7 +99,7 @@ You only run **one** .NET app for Q&A: **`OllamaMcpBridge`** (console) or **`Bri
 
 5. **If something fails:** Ollama not contacted → check `ollama list` and that nothing blocks port **11434**. DB errors → recheck `ConnectionStrings__MySQL` and that MySQL is up. **Port 8080** in this project is the optional **Adminer** website from Docker; the web app is **5088**, not 8080.
 
-**Optional:** to use a different Ollama model, edit `Ollama:Model` in `appsettings.json` or set `Ollama__Model` in the environment, and run `ollama pull` for that name.
+**Optional:** to use a different Ollama model, edit `Ollama:Model` in `appsettings.json` or set `Ollama__Model` in the environment, and run `ollama pull` for that name. For **large schema / slow local GPUs**, increase **`Ollama:RequestTimeoutSeconds`** (default **600** in config) or set **`Ollama__RequestTimeoutSeconds`** — the default `HttpClient` timeout of 100s is too short and will return HTTP 500 with `TaskCanceledException` if Ollama is still generating.
 
 ## Local test database (Docker MySQL 8)
 
@@ -148,7 +153,9 @@ Synthetic data only (`example.test` emails, generated names). **`.env` here is o
    dotnet run --project OllamaMcpBridge -- "How many rows are in the employees table?"
    ```
 
-**Schema:** `departments`, `employees`, `projects`, `assignments` with FKs — **50 rows per table**. Init order: schema → seed → create `agent_user` + `GRANT SELECT`. After changing SQL init files, recreate the volume (`docker compose down -v && docker compose up -d`) so MySQL re-runs init.
+**Schema (larger test DB):** `departments` (50), `employees` (200), `projects` (100), `assignments` (400), `customers` (150), `products` (200), `orders` (300), `order_line_items` (900), `skills` (25), `employee_skills` (300). Init order: schema → seed → `agent_user` + `GRANT SELECT`. After **any** init SQL change, recreate the data volume: `docker compose down -v` then `docker compose up -d` so MySQL re-runs init.
+
+**Test SQL reasoning (tight questions, not “bigger is harder”):** see **`examples/reasoning-test.sql`** — **two** prompts (department/skill average; order-line revenue by product category) with **reference SQL** you can run in Adminer and compare to the model.
 
 If `99-create-agent-user.sh` fails on Windows, ensure the file uses **LF** line endings (see `.gitattributes`).
 
@@ -202,7 +209,7 @@ $env:ConnectionStrings__MySQL = "Server=localhost;Port=3306;Database=db_agent_te
 dotnet run --project OllamaMcpBridge -- "How many tables are in the database?"
 ```
 
-Configure Ollama URL/model in `OllamaMcpBridge/appsettings.json` or override with environment (e.g. `Ollama__Model`).
+Configure Ollama in `OllamaMcpBridge/appsettings.json` or `BridgeWeb/appsettings.json` (or `Ollama__*` env vars): **`Ollama:BaseUrl`**, **`Ollama:Model`**, **`Ollama:Temperature`**, **`Ollama:RequestTimeoutSeconds`** (default **600** — Ollama HTTP client timeout; raise if generations exceed it).
 
 ## Raw MCP over stdio (single `tools/call` example)
 
